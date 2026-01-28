@@ -1,4 +1,4 @@
-# 🛡️ Bandit Ops Center v2.1
+# 🛡️ Bandit Ops Center V1.0
 **An intuitive mission manager and credential vault for OverTheWire's Bandit wargame.**
 
 Built with **Python** and **Object-Oriented Programming (OOP)**, this tool automates SSH command generation and securely stores credentials found during your journey in OverTheWire.
