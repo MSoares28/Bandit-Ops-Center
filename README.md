@@ -19,3 +19,11 @@ Built with **Python** and **Object-Oriented Programming (OOP)**, this tool autom
 1. Clone the repo: `git clone https://github.com/MSoares28/Bandit-Ops-Center.git`
 2. Install dependencies: `pip install customtkinter pyperclip`
 3. Run: `python main.py`
+
+## 📸 Screenshots
+
+### Dark Mode (Terminal Aesthetic)
+![Dark Mode](screenshots/dark_mode.png)
+
+### Light Mode (Enterprise Clean)
+![Light Mode](screenshots/light_mode.png)
