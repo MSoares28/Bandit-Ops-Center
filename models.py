@@ -2,7 +2,9 @@ import sqlite3
 import os
 import customtkinter as ctk
 import pyperclip
+from tkinter import messagebox
 
+# --- BanditLevel & DatabaseManager permanecem iguais ---
 class BanditLevel:
     def __init__(self, lvl=0, password=""):
         self.level = lvl
@@ -21,6 +23,7 @@ class DatabaseManager:
         self.db_path = os.path.join(current_dir, db_name)
         self.connection = sqlite3.connect(self.db_path)
         self.create_table()
+        self.seed_level_zero()
             
     def create_table(self):
         cursor = self.connection.cursor()
@@ -30,7 +33,14 @@ class DatabaseManager:
                 password TEXT
             )
         """)
-        self.connection.commit() 
+        self.connection.commit()
+
+    def seed_level_zero(self):
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT COUNT(*) FROM levels")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("INSERT INTO levels (lvl, password) VALUES (0, 'bandit0')")
+            self.connection.commit()
 
     def save_level(self, level_obj):
         cursor = self.connection.cursor()
@@ -39,9 +49,11 @@ class DatabaseManager:
         self.connection.commit()
 
     def delete_level(self, lvl):
+        if lvl == 0: return False
         cursor = self.connection.cursor()
         cursor.execute("DELETE FROM levels WHERE lvl = ?", (lvl,))
         self.connection.commit()
+        return True
 
     def get_all_levels(self):
         cursor = self.connection.cursor()
@@ -49,165 +61,201 @@ class DatabaseManager:
         rows = cursor.fetchall()
         return [BanditLevel(lvl=row[0], password=row[1]) for row in rows]
 
+# --- BanditApp Reformulado ---
 class BanditApp:
     def __init__(self, root, db_manager):
         self.root = root
         self.db = db_manager
         self.selected_level = None
+        self.ssh_text_color = ("#2D7D46", "#00FF00")
 
-        # Professional Palette (Light, Dark)
-        self.bg_color = ("#F2F2F7", "#1A1A1A")
-        self.card_color = ("#FFFFFF", "#242424")
-        self.ssh_text_color = ("#2D7D46", "#00FF00") # Dark green for light, Neon for dark
-
-        self.root.title("Bandit Ops Center v2.1")
+        self.root.title("Bandit Ops Center v2.4")
         self.root.geometry("1000x650")
-        self.root.configure(fg_color=self.bg_color)
 
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
         self.setup_ui()
         self.refresh_list()
+        
+        levels = self.db.get_all_levels()
+        if levels: self.load_details(levels[0])
 
     def setup_ui(self):
-        # --- SIDEBAR (Clean & Modern) ---
-        self.sidebar_frame = ctk.CTkFrame(self.root, width=240, corner_radius=0, fg_color=("#E5E5EA", "#111111"))
+        # --- SIDEBAR (Limpa) ---
+        self.sidebar_frame = ctk.CTkFrame(self.root, width=240, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(2, weight=1)
+        self.sidebar_frame.grid_rowconfigure(1, weight=1)
 
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="BANDIT CMD", 
-                                        font=ctk.CTkFont(family="Inter", size=24, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(40, 5))
-        
-        ctk.CTkLabel(self.sidebar_frame, text="COMMAND CENTER", text_color="gray", font=("Inter", 10, "bold")).grid(row=1, column=0, pady=(0, 20))
+        ctk.CTkLabel(self.sidebar_frame, text="BANDIT OPS", font=ctk.CTkFont(size=22, weight="bold")).grid(row=0, column=0, padx=20, pady=30)
 
-        self.level_list = ctk.CTkScrollableFrame(self.sidebar_frame, label_text="OPERATIONAL HISTORY", fg_color="transparent")
-        self.level_list.grid(row=2, column=0, padx=15, pady=15, sticky="nsew")
-
-        # Theme Switcher
-        self.appearance_mode_optionemenu = ctk.CTkOptionMenu(self.sidebar_frame, 
-                                                            values=["Dark", "Light", "System"],
-                                                            command=self.change_appearance_mode)
-        self.appearance_mode_optionemenu.grid(row=4, column=0, padx=20, pady=20)
+        self.level_list = ctk.CTkScrollableFrame(self.sidebar_frame, label_text="MISSIONS")
+        self.level_list.grid(row=1, column=0, padx=15, pady=15, sticky="nsew")
 
         # --- MAIN DASHBOARD ---
         self.main_container = ctk.CTkFrame(self.root, fg_color="transparent")
-        self.main_container.grid(row=0, column=1, padx=40, pady=40, sticky="nsew")
+        self.main_container.grid(row=0, column=1, padx=30, pady=30, sticky="nsew")
 
-        # Adaptive Header
-        self.header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.header_frame.pack(fill="x", pady=(0, 30))
-        
-        self.level_title = ctk.CTkLabel(self.header_frame, text="System Idle...", 
-                                        font=ctk.CTkFont(size=32, weight="bold"))
-        self.level_title.pack(side="left")
+        self.level_title = ctk.CTkLabel(self.main_container, text="Mission Control", font=ctk.CTkFont(size=28, weight="bold"))
+        self.level_title.pack(pady=(0, 20))
 
-        self.status_label = ctk.CTkLabel(self.header_frame, text="", text_color=self.ssh_text_color, font=("Inter", 13, "italic"))
-        self.status_label.pack(side="right")
-
-        # CARD 1: TARGET ACCESS (SSH)
-        self.ssh_card = ctk.CTkFrame(self.main_container, corner_radius=20, fg_color=self.card_color, border_width=1, border_color=("#D1D1D6", "#333333"))
-        self.ssh_card.pack(fill="x", pady=15, ipady=20)
-        
-        ctk.CTkLabel(self.ssh_card, text="TARGET DEPLOYMENT COMMAND", font=ctk.CTkFont(size=11, weight="bold"), text_color="gray").pack(padx=30, anchor="w", pady=(20, 10))
-        
-        self.ssh_display = ctk.CTkLabel(self.ssh_card, text="Waiting for mission selection...", 
-                                        font=ctk.CTkFont(family="Consolas", size=20), 
-                                        text_color=self.ssh_text_color)
+        # SSH CARD
+        self.ssh_card = ctk.CTkFrame(self.main_container, corner_radius=15)
+        self.ssh_card.pack(fill="x", pady=10, ipady=15)
+        self.ssh_display = ctk.CTkLabel(self.ssh_card, text="---", font=("Consolas", 18), text_color=self.ssh_text_color)
         self.ssh_display.pack(pady=10)
+        ctk.CTkButton(self.ssh_card, text="COPY SSH COMMAND", command=self.copy_ssh).pack()
 
-        self.btn_ssh_copy = ctk.CTkButton(self.ssh_card, text="COPY ACCESS STRING", width=250, height=45,
-                                          corner_radius=10, font=ctk.CTkFont(weight="bold"), 
-                                          command=self.copy_ssh)
-        self.btn_ssh_copy.pack(pady=15)
+        # PASSWORD CARD (Onde a mágica acontece)
+        self.creds_card = ctk.CTkFrame(self.main_container, corner_radius=15)
+        self.creds_card.pack(fill="x", pady=10, ipady=15)
 
-        # CARD 2: INFILTRATION DATA (Passwords)
-        self.creds_card = ctk.CTkFrame(self.main_container, corner_radius=20, fg_color=self.card_color, border_width=1, border_color=("#D1D1D6", "#333333"))
-        self.creds_card.pack(fill="x", pady=15, ipady=20)
+        self.pass_input = ctk.CTkEntry(self.creds_card, placeholder_text="Paste password here...", 
+                                        height=45, font=("Consolas", 16), justify="center")
+        self.pass_input.pack(fill="x", padx=60, pady=15)
 
-        ctk.CTkLabel(self.creds_card, text="ENCRYPTED CREDENTIALS", font=ctk.CTkFont(size=11, weight="bold"), text_color="gray").pack(padx=30, anchor="w", pady=(20, 10))
+        # Centralized action buttons
+        self.actions_frame = ctk.CTkFrame(self.creds_card, fg_color="transparent")
+        self.actions_frame.pack(pady=10)
+
+        self.btn_save = ctk.CTkButton(self.actions_frame, text="SAVE", fg_color="#2d7d46", command=self.save_progress)
+        self.btn_save.grid(row=0, column=0, padx=5)
+
+        self.btn_edit = ctk.CTkButton(self.actions_frame, text="EDIT", fg_color="#5a5a5a", command=self.enable_edit)
+        self.btn_edit.grid(row=0, column=1, padx=5)
+
+        self.btn_pass_copy = ctk.CTkButton(self.actions_frame, text="COPY PASS", command=self.copy_pass)
+        self.btn_pass_copy.grid(row=0, column=2, padx=5)
+
+        self.btn_delete = ctk.CTkButton(self.actions_frame, text="DELETE", fg_color="#942a2a", command=self.delete_level)
+        self.btn_delete.grid(row=0, column=3, padx=5)
+
+        # Progress buttons
+        self.btn_add_next = ctk.CTkButton(self.main_container, text="LOCKED: SAVE PASSWORD", 
+                                          height=60, font=ctk.CTkFont(size=18, weight="bold"),
+                                          state="disabled", fg_color="gray",
+                                          command=self.create_next)
+        self.btn_add_next.pack(fill="x", padx=40, pady=30)
+
+        # Toast Notification Label
+        self.toast_label = ctk.CTkLabel(self.main_container, text="", 
+                                         font=ctk.CTkFont(size=12, slant="italic"),
+                                         text_color=self.ssh_text_color)
+        self.toast_label.pack(pady=5)
+
+    def enable_edit(self):
+        """Libera a caixa de texto para edição"""
+        self.pass_input.configure(state="normal")
+        self.btn_save.configure(state="normal")
+        self.pass_input.focus()
+
+    def check_progression(self):
+        levels = self.db.get_all_levels()
+        if not levels: return
+        last_lvl = levels[-1]
         
-        self.pass_input = ctk.CTkEntry(self.creds_card, placeholder_text="Stored password will appear here...",
-                                        height=50, font=ctk.CTkFont(family="Consolas", size=18),
-                                        fg_color=("#F9F9F9", "#1A1A1A"), border_color=("#D1D1D6", "#444444"),
-                                        justify="center")
-        self.pass_input.pack(fill="x", padx=80, pady=20)
+        if last_lvl.level >= 33:
+            self.btn_add_next.configure(text="ALL MISSIONS DEPLOYED", state="disabled", fg_color="#1a1a1a")
+            return
 
-        self.creds_actions = ctk.CTkFrame(self.creds_card, fg_color="transparent")
-        self.creds_actions.pack(pady=5)
+        if last_lvl.password and last_lvl.password.strip() != "" and last_lvl.password != "bandit0":
+             # Se for o level 0, a senha já vem preenchida, mas queremos que o usuário jogue.
+             # Para o Level 0 especificamente, vamos liberar se ele estiver selecionado ou já salvo.
+             pass 
 
-        self.btn_save = ctk.CTkButton(self.creds_actions, text="SAVE PROGRESS", fg_color="#34C759", hover_color="#28A745", text_color="white", command=self.save_progress)
-        self.btn_save.grid(row=0, column=0, padx=10)
-
-        self.btn_pass_copy = ctk.CTkButton(self.creds_actions, text="COPY PASS", command=self.copy_pass)
-        self.btn_pass_copy.grid(row=0, column=1, padx=10)
-
-        self.btn_delete = ctk.CTkButton(self.creds_actions, text="PURGE", fg_color="#FF3B30", hover_color="#D70015", width=60, command=self.delete_level)
-        self.btn_delete.grid(row=0, column=2, padx=10)
-
-        # CTA: NEXT MISSION
-        self.btn_next = ctk.CTkButton(self.main_container, text="PROMOTE TO NEXT MISSION", 
-                                        height=65, font=ctk.CTkFont(size=18, weight="bold"),
-                                        corner_radius=12, border_width=2, fg_color="transparent",
-                                        command=self.create_next)
-        self.btn_next.pack(side="bottom", fill="x", pady=20)
-
-    # --- Methods ---
-    def change_appearance_mode(self, new_mode):
-        ctk.set_appearance_mode(new_mode)
-
-    def show_status(self, msg):
-        self.status_label.configure(text=f"// {msg}")
-        self.root.after(2500, lambda: self.status_label.configure(text=""))
+        # Lógica simplificada: se o último nível tem algo escrito, libera o próximo
+        if last_lvl.password and len(last_lvl.password.strip()) > 5: # Senhas do Bandit são longas
+            self.btn_add_next.configure(text=f"UNLOCK MISSION {last_lvl.level + 1} ➔", state="normal", fg_color="#2d7d46")
+        else:
+            self.btn_add_next.configure(text="LOCKED: SAVE CURRENT PASSWORD", state="disabled", fg_color="gray")
 
     def refresh_list(self):
         for widget in self.level_list.winfo_children():
             widget.destroy()
         for lvl in self.db.get_all_levels():
-            btn = ctk.CTkButton(self.level_list, text=f"MISSION {lvl.level}", 
-                                fg_color="transparent", text_color=("black", "white"),
-                                hover_color=("#D1D1D6", "#333333"), anchor="w",
+            btn = ctk.CTkButton(self.level_list, text=f"Mission {lvl.level}", 
+                                fg_color="transparent", border_width=1,
                                 command=lambda obj=lvl: self.load_details(obj))
-            btn.pack(fill="x", pady=4, padx=5)
+            btn.pack(fill="x", pady=2)
+        self.check_progression()
 
     def load_details(self, level_obj):
         self.selected_level = level_obj
-        self.level_title.configure(text=f"MISSION {level_obj.level}")
+        self.level_title.configure(text=f"BANDIT MISSION {level_obj.level}")
         self.ssh_display.configure(text=level_obj.get_ssh_command())
+        
+        # Limpa e carrega a senha
+        self.pass_input.configure(state="normal")
         self.pass_input.delete(0, "end")
         self.pass_input.insert(0, level_obj.password)
+        
+        # Lock input if a password already exists
+        if level_obj.password and level_obj.password.strip() != "":
+            self.pass_input.configure(state="disabled")
+            self.btn_save.configure(state="disabled")
+        else:
+            self.pass_input.configure(state="normal")
+            self.btn_save.configure(state="normal")
+
+        # Trava Delete no Level 0
+        state = "disabled" if level_obj.level == 0 else "normal"
+        color = "gray" if level_obj.level == 0 else "#942a2a"
+        self.btn_delete.configure(state=state, fg_color=color)
 
     def save_progress(self):
         if self.selected_level:
-            self.selected_level.password = self.pass_input.get()
+            new_pass = self.pass_input.get()
+            if new_pass.strip() == "":
+                messagebox.showwarning("Warning", "Password cannot be empty!")
+                return
+                
+            self.selected_level.password = new_pass
             self.db.save_level(self.selected_level)
-            self.show_status("DATA ENCRYPTED")
+            
+            # Lock UI after successful save
+            self.pass_input.configure(state="disabled")
+            self.btn_save.configure(state="disabled")
+            self.show_toast("Progress secured and locked!")
+            self.check_progression()
+
+    def create_next(self):
+        levels = self.db.get_all_levels()
+        if not levels: return
+        last_lvl = levels[-1]
+        new_num = last_lvl.level + 1
+        
+        if new_num <= 33:
+            new_lvl = BanditLevel(lvl=new_num, password="")
+            self.db.save_level(new_lvl)
+            self.refresh_list()
+            self.load_details(new_lvl)
+
+    def delete_level(self):
+        if self.selected_level and self.selected_level.level != 0:
+            self.db.delete_level(self.selected_level.level)
+            self.refresh_list()
+            levels = self.db.get_all_levels()
+            self.load_details(levels[-1])
 
     def copy_ssh(self):
         if self.selected_level:
             pyperclip.copy(self.selected_level.get_ssh_command())
-            self.show_status("SSH STRING COPIED")
+            self.show_toast("SSH command copied!")
 
     def copy_pass(self):
         if self.selected_level:
-            pyperclip.copy(self.pass_input.get())
-            self.show_status("PASSCODE COPIED")
+            # Copy directly from the object to ensure data integrity
+            pyperclip.copy(self.selected_level.password)
+            self.show_toast("Password copied to clipboard!")
 
-    def delete_level(self):
-        if self.selected_level:
-            self.db.delete_level(self.selected_level.level)
-            self.refresh_list()
-            self.level_title.configure(text="System Idle...")
-            self.ssh_display.configure(text="Waiting for mission selection...")
-            self.pass_input.delete(0, "end")
-            self.show_status("MISSION PURGED")
+    def show_toast(self, message):
+        """Displays a temporary feedback message on screen"""
+        self.toast_label.configure(text=f"✔ {message}")
+        # Clear the message after 2 seconds
+        self.root.after(2000, lambda: self.toast_label.configure(text=""))
 
-    def create_next(self):
-        levels = self.db.get_all_levels()
-        next_num = (levels[-1].level + 1) if levels else 0
-        new_lvl = BanditLevel(lvl=next_num, password="")
-        self.db.save_level(new_lvl)
-        self.refresh_list()
-        self.load_details(new_lvl)
-        self.show_status(f"DEPLOYING MISSION {next_num}")
+    def enable_edit(self):
+        """Unlocks the password field for manual changes"""
+        self.pass_input.configure(state="normal")
+        self.btn_save.configure(state="normal")
+        self.pass_input.focus()        
